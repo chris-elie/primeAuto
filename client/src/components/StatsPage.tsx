@@ -19,12 +19,16 @@ import {
   BarChart,
   Bar,
 } from 'recharts';
-import { getWeekly, getRevenues, type Weekly, type Revenue } from '../api';
+import { getWeeklyRevenue, getRevenues, type WeeklyRevenue, type RevenueWithVehicle } from '../services/revenues';
+import { getVehicles } from '../services/vehicles';
+import { getMaintenances } from '../services/maintenances';
 import { cn } from '../utils';
+import ExportMenu from './ExportMenu';
+import { exportToExcel, exportToPdf, formatExportCurrency, formatExportDate, formatExportStatus, type ExportColumn, type ExportRow, type ExportSheet } from '../utils/export';
 
 export default function StatsPage() {
-  const [weekly, setWeekly] = useState<Weekly | null>(null);
-  const [revenues, setRevenues] = useState<Revenue[]>([]);
+  const [weekly, setWeekly] = useState<WeeklyRevenue | null>(null);
+  const [revenues, setRevenues] = useState<RevenueWithVehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [filterType, setFilterType] = useState<'all' | 'recette' | 'depense'>('all');
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +38,7 @@ export default function StatsPage() {
       setLoading(true);
       setError(null);
       const [weekData, revData] = await Promise.all([
-        getWeekly(),
+        getWeeklyRevenue(),
         getRevenues(),
       ]);
       setWeekly(weekData);
@@ -69,6 +73,73 @@ export default function StatsPage() {
     return r.type === filterType;
   });
 
+  const exportColumns: ExportColumn[] = [
+    { header: 'Véhicule', dataKey: 'vehicule' },
+    { header: 'Montant', dataKey: 'montant' },
+    { header: 'Type', dataKey: 'type' },
+    { header: 'Description', dataKey: 'description' },
+    { header: 'Date', dataKey: 'date' },
+  ];
+  const selectedRevenueTotal = filteredRevenues.reduce((sum, revenue) => sum + Number(revenue.montant), 0);
+  const revenueRows: ExportRow[] = filteredRevenues.map((revenue) => ({
+    vehicule: revenue.vehicule ?? '—',
+    montant: formatExportCurrency(Number(revenue.montant)),
+    type: formatExportStatus(revenue.type),
+    description: revenue.description ?? '—',
+    date: formatExportDate(revenue.date_transaction),
+  }));
+  const exportRevenueRows: ExportRow[] = revenueRows.length > 0
+    ? [...revenueRows, {
+        vehicule: '',
+        montant: formatExportCurrency(selectedRevenueTotal),
+        type: 'TOTAL',
+        description: `${filteredRevenues.length} transaction(s)`,
+        date: '',
+      }]
+    : [];
+
+  const exportAllData = async () => {
+    const [allVehicles, allMaintenances, allRevenues] = await Promise.all([
+      getVehicles(),
+      getMaintenances(),
+      getRevenues(),
+    ]);
+    if (allVehicles.length + allMaintenances.length + allRevenues.length === 0) {
+      throw new Error('Aucune donnée à exporter.');
+    }
+    const vehicleRows: ExportRow[] = allVehicles.map((vehicle) => ({
+      Véhicule: vehicle.nom,
+      Kilométrage: `${vehicle.kilometrage.toLocaleString('fr-CA')} km`,
+      Statut: formatExportStatus(vehicle.statut),
+      'Dernière révision': formatExportDate(vehicle.derniere_revision),
+    }));
+    const maintenanceRows: ExportRow[] = allMaintenances.map((maintenance) => ({
+      Véhicule: allVehicles.find((vehicle) => vehicle.id === maintenance.vehicle_id)?.nom ?? `Véhicule #${maintenance.vehicle_id}`,
+      Description: maintenance.description,
+      'Date prévue': formatExportDate(maintenance.date_prevue),
+      'Date effectuée': formatExportDate(maintenance.date_effectuee),
+      Coût: formatExportCurrency(Number(maintenance.cout)),
+      Statut: formatExportStatus(maintenance.date_effectuee ? 'fait' : maintenance.statut),
+    }));
+    const revenueTotal = allRevenues.reduce((sum, revenue) => sum + Number(revenue.montant), 0);
+    const allRevenueRows: ExportRow[] = allRevenues.map((revenue) => ({
+      Véhicule: revenue.vehicule ?? '—',
+      Montant: formatExportCurrency(Number(revenue.montant)),
+      Type: formatExportStatus(revenue.type),
+      Description: revenue.description ?? '—',
+      Date: formatExportDate(revenue.date_transaction),
+    }));
+    if (allRevenueRows.length > 0) {
+      allRevenueRows.push({ Véhicule: '', Montant: formatExportCurrency(revenueTotal), Type: 'TOTAL', Description: `${allRevenues.length} transaction(s)`, Date: '' });
+    }
+    const sheets: ExportSheet[] = [
+      { nom: 'Véhicules', lignes: vehicleRows, colonnes: ['Véhicule', 'Kilométrage', 'Statut', 'Dernière révision'] },
+      { nom: 'Entretiens', lignes: maintenanceRows, colonnes: ['Véhicule', 'Description', 'Date prévue', 'Date effectuée', 'Coût', 'Statut'] },
+      { nom: 'Revenus', lignes: allRevenueRows, colonnes: ['Véhicule', 'Montant', 'Type', 'Description', 'Date'] },
+    ];
+    await exportToExcel('primeauto_tout', sheets);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto bg-[#0b1120] text-slate-100 p-6 lg:p-8">
       {/* Header */}
@@ -87,14 +158,24 @@ export default function StatsPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={loadData}
-          disabled={loading}
-          className="flex items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/80 p-2.5 text-slate-300 transition hover:bg-slate-700 disabled:opacity-50"
-        >
-          <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin text-indigo-400')} />
-        </button>
+        <div className="flex items-center gap-3">
+          <ExportMenu
+            onPdf={() => exportToPdf('Statistiques et revenus', exportColumns, exportRevenueRows, 'revenus')}
+            onExcel={() => exportToExcel('revenus', [{ nom: 'Revenus', lignes: exportRevenueRows }])}
+            onExportAllExcel={exportAllData}
+            pdfDisabled={loading || exportRevenueRows.length === 0}
+            excelDisabled={loading || exportRevenueRows.length === 0}
+            exportAllDisabled={loading}
+          />
+          <button
+            type="button"
+            onClick={loadData}
+            disabled={loading}
+            className="flex items-center justify-center rounded-xl border border-slate-700/80 bg-slate-800/80 p-2.5 text-slate-300 transition hover:bg-slate-700 disabled:opacity-50"
+          >
+            <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin text-indigo-400')} />
+          </button>
+        </div>
       </header>
 
       {error && (

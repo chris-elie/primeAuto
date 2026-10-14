@@ -20,14 +20,10 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts';
-import {
-  getSummary,
-  getWeekly,
-  getVehicles,
-  type Summary,
-  type Weekly,
-  type Vehicle,
-} from '../api';
+import { getVehicles } from '../services/vehicles';
+import { getUpcomingMaintenances } from '../services/maintenances';
+import { getWeeklyRevenue, type WeeklyRevenue } from '../services/revenues';
+import type { Vehicle } from '../types/database';
 import { cn } from '../utils';
 
 interface DashboardProps {
@@ -39,8 +35,8 @@ export default function DashboardPrimeAuto({
   onNavigateToFleet,
   onNavigateToMaintenance,
 }: DashboardProps) {
-  const [summary, setSummary] = useState<Summary | null>(null);
-  const [weekly, setWeekly] = useState<Weekly | null>(null);
+  const [summary, setSummary] = useState<{ vehiculesActifs: number; entretiensAVenir: number; panneauxAlerte: number } | null>(null);
+  const [weekly, setWeekly] = useState<WeeklyRevenue | null>(null);
   const [vehicles, setVehicles] = useState<Vehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -50,12 +46,16 @@ export default function DashboardPrimeAuto({
     try {
       setLoading(true);
       setError(null);
-      const [sumData, weekData, vehData] = await Promise.all([
-        getSummary(),
-        getWeekly(),
+      const [weekData, vehData, upcoming] = await Promise.all([
+        getWeeklyRevenue(),
         getVehicles(),
+        getUpcomingMaintenances(),
       ]);
-      setSummary(sumData);
+      setSummary({
+        vehiculesActifs: vehData.filter((vehicle) => vehicle.statut === 'ok').length,
+        entretiensAVenir: upcoming.length,
+        panneauxAlerte: vehData.filter((vehicle) => vehicle.statut === 'panne' || vehicle.statut === 'entretien').length,
+      });
       setWeekly(weekData);
       setVehicles(vehData);
     } catch (err: unknown) {

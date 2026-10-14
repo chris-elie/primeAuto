@@ -7,7 +7,7 @@ import {
   User,
   ShieldCheck,
 } from 'lucide-react';
-import type { AuthUser } from '../api';
+import type { AppUser } from '../types/database';
 import { cn } from '../utils';
 
 export type TabKey = 'dashboard' | 'fleet' | 'maintenances' | 'stats';
@@ -15,7 +15,7 @@ export type TabKey = 'dashboard' | 'fleet' | 'maintenances' | 'stats';
 interface SidebarProps {
   currentTab: TabKey;
   onSelectTab: (tab: TabKey) => void;
-  user: AuthUser | null;
+  user: AppUser | null;
   onLogout: () => void;
   alertCount?: number;
   maintenanceCount?: number;

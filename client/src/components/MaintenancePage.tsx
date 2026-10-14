@@ -12,19 +12,15 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react';
-import {
-  getMaintenances,
-  getVehicles,
-  createMaintenance,
-  completeMaintenance,
-  type Maintenance,
-  type Vehicle,
-  type AuthUser,
-} from '../api';
+import { getMaintenances, createMaintenance, updateMaintenance } from '../services/maintenances';
+import { getVehicles } from '../services/vehicles';
+import type { AppUser, Maintenance, Vehicle } from '../types/database';
 import { cn } from '../utils';
+import ExportMenu from './ExportMenu';
+import { exportToExcel, exportToPdf, formatExportCurrency, formatExportDate, formatExportStatus, type ExportColumn, type ExportRow } from '../utils/export';
 
 interface MaintenancePageProps {
-  user: AuthUser | null;
+  user: AppUser | null;
 }
 
 export default function MaintenancePage({ user }: MaintenancePageProps) {
@@ -36,14 +32,14 @@ export default function MaintenancePage({ user }: MaintenancePageProps) {
 
   // Modal State
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedVehicleId, setSelectedVehicleId] = useState<number>(0);
+  const [selectedVehicleId, setSelectedVehicleId] = useState('');
   const [description, setDescription] = useState('');
   const [datePrevue, setDatePrevue] = useState('');
   const [cout, setCout] = useState<number>(0);
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const isGestionnaire = user?.role === 'gestionnaire' || user?.role === 'admin';
+  const isGestionnaire = user?.role === 'gestionnaire';
 
   const loadData = async () => {
     try {
@@ -55,7 +51,7 @@ export default function MaintenancePage({ user }: MaintenancePageProps) {
       ]);
       setMaintenances(maintData);
       setVehicles(vehData);
-      if (vehData.length > 0 && selectedVehicleId === 0) {
+      if (vehData.length > 0 && selectedVehicleId === '') {
         setSelectedVehicleId(vehData[0].id);
       }
     } catch (err: unknown) {
@@ -122,7 +118,17 @@ export default function MaintenancePage({ user }: MaintenancePageProps) {
 
     try {
       const finalCost = Number(costInput) || maint.cout;
-      await completeMaintenance(maint.id, finalCost);
+      await updateMaintenance(maint.id, {
+        date_effectuee: (() => {
+          const today = new Date();
+          const year = today.getFullYear();
+          const month = String(today.getMonth() + 1).padStart(2, '0');
+          const day = String(today.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        })(),
+        statut: 'fait',
+        cout: finalCost,
+      });
       await loadData();
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -142,6 +148,22 @@ export default function MaintenancePage({ user }: MaintenancePageProps) {
   const pendingCount = maintenances.filter((m) => !m.date_effectuee).length;
   const completedCount = maintenances.filter((m) => !!m.date_effectuee).length;
   const totalCost = maintenances.reduce((acc, m) => acc + Number(m.cout || 0), 0);
+  const exportColumns: ExportColumn[] = [
+    { header: 'Véhicule', dataKey: 'vehicule' },
+    { header: 'Description', dataKey: 'description' },
+    { header: 'Date prévue', dataKey: 'date_prevue' },
+    { header: 'Date effectuée', dataKey: 'date_effectuee' },
+    { header: 'Coût', dataKey: 'cout' },
+    { header: 'Statut', dataKey: 'statut' },
+  ];
+  const exportRows: ExportRow[] = filteredMaintenances.map((maintenance) => ({
+    vehicule: vehicles.find((vehicle) => vehicle.id === maintenance.vehicle_id)?.nom ?? `Véhicule #${maintenance.vehicle_id}`,
+    description: maintenance.description,
+    date_prevue: formatExportDate(maintenance.date_prevue),
+    date_effectuee: formatExportDate(maintenance.date_effectuee),
+    cout: formatExportCurrency(Number(maintenance.cout)),
+    statut: formatExportStatus(maintenance.date_effectuee ? 'fait' : maintenance.statut),
+  }));
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#0b1120] text-slate-100 p-6 lg:p-8">
@@ -162,16 +184,20 @@ export default function MaintenancePage({ user }: MaintenancePageProps) {
         </div>
 
         <div className="flex items-center gap-3">
-          {isGestionnaire && (
-            <button
-              type="button"
-              onClick={handleOpenModal}
-              className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-semibold text-slate-950 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400"
-            >
-              <Plus className="h-4 w-4" />
-              <span>Planifier un entretien</span>
-            </button>
-          )}
+          <ExportMenu
+            onPdf={() => exportToPdf('Entretiens et révisions', exportColumns, exportRows, 'entretiens')}
+            onExcel={() => exportToExcel('entretiens', [{ nom: 'Entretiens', lignes: exportRows }])}
+            pdfDisabled={loading || exportRows.length === 0}
+            excelDisabled={loading || exportRows.length === 0}
+          />
+          <button
+            type="button"
+            onClick={handleOpenModal}
+            className="flex items-center gap-2 rounded-xl bg-amber-500 px-4 py-2.5 text-xs font-semibold text-slate-950 shadow-lg shadow-amber-500/25 transition hover:bg-amber-400"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Planifier un entretien</span>
+          </button>
 
           <button
             type="button"
@@ -282,7 +308,7 @@ export default function MaintenancePage({ user }: MaintenancePageProps) {
                       <td className="px-6 py-4 font-semibold text-white">
                         <div className="flex items-center gap-2.5">
                           <Car className="h-4 w-4 text-amber-400 shrink-0" />
-                          <span>{maint.vehicule || `Véhicule #${maint.vehicle_id}`}</span>
+                          <span>{vehicles.find((vehicle) => vehicle.id === maint.vehicle_id)?.nom || `Véhicule #${maint.vehicle_id}`}</span>
                         </div>
                       </td>
                       <td className="px-6 py-4 text-slate-300">{maint.description}</td>
@@ -369,7 +395,7 @@ export default function MaintenancePage({ user }: MaintenancePageProps) {
                 </label>
                 <select
                   value={selectedVehicleId}
-                  onChange={(e) => setSelectedVehicleId(Number(e.target.value))}
+                  onChange={(e) => setSelectedVehicleId(e.target.value)}
                   className="w-full rounded-xl border border-slate-700 bg-slate-900 py-2.5 px-3.5 text-sm text-white focus:border-amber-500 focus:outline-none"
                 >
                   {vehicles.map((v) => (

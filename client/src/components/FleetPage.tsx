@@ -11,19 +11,15 @@ import {
   AlertCircle,
   Loader2,
 } from 'lucide-react';
-import {
-  getVehicles,
-  createVehicle,
-  updateVehicle,
-  deleteVehicle,
-  type Vehicle,
-  type AuthUser,
-} from '../api';
+import { getVehicles, createVehicle, updateVehicle, deleteVehicle } from '../services/vehicles';
+import type { AppUser, Vehicle } from '../types/database';
 import { StatusBadge } from './DashboardPrimeAuto';
+import ExportMenu from './ExportMenu';
 import { cn } from '../utils';
+import { exportToExcel, exportToPdf, formatExportDate, formatExportStatus, type ExportColumn, type ExportRow } from '../utils/export';
 
 interface FleetPageProps {
-  user: AuthUser | null;
+  user: AppUser | null;
 }
 
 export default function FleetPage({ user }: FleetPageProps) {
@@ -43,7 +39,7 @@ export default function FleetPage({ user }: FleetPageProps) {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const isGestionnaire = user?.role === 'gestionnaire' || user?.role === 'admin';
+  const isGestionnaire = user?.role === 'gestionnaire';
 
   const loadVehicles = async (query = '') => {
     try {
@@ -120,7 +116,7 @@ export default function FleetPage({ user }: FleetPageProps) {
     }
   };
 
-  const handleDeleteVehicle = async (id: number, nom: string) => {
+  const handleDeleteVehicle = async (id: string, nom: string) => {
     if (!window.confirm(`Voulez-vous vraiment supprimer le véhicule "${nom}" ?`)) return;
 
     try {
@@ -139,6 +135,19 @@ export default function FleetPage({ user }: FleetPageProps) {
     if (statusFilter === 'all') return true;
     return v.statut === statusFilter;
   });
+
+  const exportColumns: ExportColumn[] = [
+    { header: 'Véhicule', dataKey: 'nom' },
+    { header: 'Kilométrage', dataKey: 'kilometrage' },
+    { header: 'Statut', dataKey: 'statut' },
+    { header: 'Dernière révision', dataKey: 'derniere_revision' },
+  ];
+  const exportRows: ExportRow[] = filteredVehicles.map((vehicle) => ({
+    nom: vehicle.nom,
+    kilometrage: `${vehicle.kilometrage.toLocaleString('fr-CA')} km`,
+    statut: formatExportStatus(vehicle.statut),
+    derniere_revision: formatExportDate(vehicle.derniere_revision),
+  }));
 
   return (
     <div className="flex-1 overflow-y-auto bg-[#0b1120] text-slate-100 p-6 lg:p-8">
@@ -159,6 +168,12 @@ export default function FleetPage({ user }: FleetPageProps) {
         </div>
 
         <div className="flex items-center gap-3">
+          <ExportMenu
+            onPdf={() => exportToPdf('Flotte de véhicules', exportColumns, exportRows, 'vehicules')}
+            onExcel={() => exportToExcel('vehicules', [{ nom: 'Véhicules', lignes: exportRows }])}
+            pdfDisabled={loading || exportRows.length === 0}
+            excelDisabled={loading || exportRows.length === 0}
+          />
           {isGestionnaire && (
             <button
               type="button"

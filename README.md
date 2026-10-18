@@ -1,4 +1,4 @@
-# primeAuto(mon projet que jaimerais realiser avce de vrai vehicule)
+# primeAuto
 
 **Application complète de gestion de véhicules** : entretiens, revenus et recettes, avec un suivi au quotidien des entrées et des sorties.
 
